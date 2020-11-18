@@ -1,11 +1,20 @@
 # -*-coding:utf-8-*-
+import os.path as op
 import usb1, struct, socket
+from adb import sign_cryptography
+
+signer = sign_cryptography.CryptographySigner(
+    op.expanduser('~/.android/adbkey'))
 
 CLASS = 0xFF
 SUBCLASS = 0x42
 PROTOCOL = 0x01
 VERSION = 0x01000000
 MAX_ADB_DATA = 4096
+
+AUTH_TOKEN = 1
+AUTH_SIGNATURE = 2
+AUTH_RSAPUBLICKEY = 3
 
 ctx = usb1.USBContext()
 
@@ -69,6 +78,7 @@ def Open(dev):
 
     handle = dev.open()
     iface_number = adb_setting.getNumber()
+    print(iface_number)
     # try:
     #     if (platform.system() != 'Windows'
     #             and handle.kernelDriverActive(iface_number)):
@@ -99,6 +109,7 @@ data=b'host::%s\0' % banner
 msg = struct.pack(format, commands[b'CNXN'], VERSION, MAX_ADB_DATA,
                            len(data), CalculateChecksum(data), commands[b'CNXN']^0xFFFFFFFF)
 
+adb_device = Open(adb_device)
 read_endpoint = None
 write_endpoint = None
 max_read_packet_len = 0
@@ -112,7 +123,6 @@ for end_point in adb_setting.iterEndpoints():
         write_endpoint = address
 print("[r,w] {} {}".format(read_endpoint, write_endpoint))
 
-adb_device = Open(adb_device)
 adb_device.claimInterface(iface_number)
 adb_device.bulkWrite(write_endpoint, msg)
 adb_device.bulkWrite(write_endpoint, data)
@@ -143,9 +153,55 @@ if data_length > 0:
         print("校验错误")
 else:
     data = b''
+print(command, arg0, arg1, bytes(data))
+
+# 第二步
+banner = bytes(data)
+
+signed_token = signer.Sign(banner)
+msg = struct.pack(format, commands[b'AUTH'], AUTH_SIGNATURE, 0,
+                           len(signed_token), CalculateChecksum(signed_token), commands[b'AUTH']^0xFFFFFFFF)
+adb_device.bulkWrite(write_endpoint, msg)
+adb_device.bulkWrite(write_endpoint, signed_token)
+
+while True:
+    msg = bytearray(adb_device.bulkRead(read_endpoint, 24))
+    cmd, arg0, arg1, data_length, data_checksum, unused_magic = struct.unpack(format, msg)
+    command = constants[cmd]
+    print(command, arg0, arg1, data_length, data_checksum, unused_magic)
+    if command in [b'CNXN', b'AUTH']:
+        break
+
+print("跳出")
+if data_length > 0:
+    data = bytearray()
+    while data_length > 0:
+        temp = bytearray(adb_device.bulkRead(read_endpoint, data_length))
+        if len(temp) != data_length:
+            print(
+                "Data_length {} does not match actual number of bytes read: {}".format(data_length, len(temp)))
+        data += temp
+
+        data_length -= len(temp)
+
+    actual_checksum = CalculateChecksum(data)
+    if actual_checksum != data_checksum:
+        print("校验错误")
+else:
+    data = b''
+print("第二步结果", command, arg0, arg1, bytes(data))
+
+conn_str = bytearray(data)
+# Remove banner and colons after device state (state::banner)
+parts = conn_str.split(b'::')
+_device_state = parts[0]
+
+# Break out the build prop info
+build_props = str(parts[1].split(b';'))
+print("结果",_device_state, build_props)
 
 adb_device.releaseInterface(iface_number)
 adb_device.close()
 
-print(command, arg0, arg1, bytes(data))
+
 

@@ -1,0 +1,24 @@
+# -*-coding:utf-8-*-
+# adb usb 设备 的 辨识标志
+CLASS = 0xFF
+SUBCLASS = 0x42
+PROTOCOL = 0x01
+
+# 版本信息，认证时需要
+VERSION = 0x01000000
+MAX_ADB_DATA = 4096
+
+# adb 协议中定义的命令
+SYNC = 0x434e5953
+CNXN = 0x4e584e43
+AUTH = 0x48545541
+OPEN = 0x4e45504f
+OKAY = 0x59414b4f
+CLSE = 0x45534c43
+WRTE = 0x45545257
+STLS = 0x534C5453
+
+# 认证参数
+AUTH_TOKEN = 1
+AUTH_SIGNATURE = 2
+AUTH_RSAPUBLICKEY = 3
