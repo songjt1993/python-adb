@@ -6,7 +6,7 @@ from .exceptions import *
 
 CLASS = 0xFF
 SUBCLASS = 0x42
-PROTOCOL = 0x03
+PROTOCOL = 0x01
 
 
 class DevicePool(object):
