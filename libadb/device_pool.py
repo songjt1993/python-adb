@@ -2,8 +2,11 @@
 import usb1, os, struct, socket, traceback
 from .handle import TCPHandle, USBHandle
 from .device import AndroidDevice
-from .util1.params import *
 from .exceptions import *
+
+CLASS = 0xFF
+SUBCLASS = 0x42
+PROTOCOL = 0x03
 
 
 class DevicePool(object):
