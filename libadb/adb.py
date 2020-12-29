@@ -28,7 +28,12 @@ def forward(tcp1, tcp2, sno=None):
     device.forward(tcp1, tcp2)
 
 
-
-def push():
-    pass
+def push(local_path, remote_path, sno=None, block=True):
+    device = DEVICEPOOL.get_device(sno)
+    cn = device.push(local_path, remote_path)
+    if block:
+        cn.wait()
+        return cn.output()
+    else:
+        return cn
 

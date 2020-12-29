@@ -85,57 +85,10 @@ class AndroidDevice(object):
         self._proto._clear_cache(local_id=local_id)
         self._proto.send(OPEN, local_id, 0, b"sync:\n")
         cmd, remote_id, _, _ = self._proto.receive(local_id=local_id)
-
-        if cmd != OKAY:
+        if cmd == OKAY:
+            return PushConnection(self._proto, local_id, remote_id, local_filepath, remote_filepath)
+        else:
             raise Exception("Fail to establish connection")
-
-        data = "{},{}".format(remote_filepath, os.stat(local_filepath).st_mode)
-        self._proto.send(WRTE, local_id, remote_id,
-                         struct.pack(b"<2I", int.from_bytes(b"SEND", byteorder="little"), len(data)))
-        cmd, remote_id, _, _ = self._proto.receive(local_id=local_id, remote_id=remote_id)
-
-        if cmd != OKAY:
-            raise Exception("Fail to send Path")
-
-        self._proto.send(WRTE, local_id, remote_id, data.encode("utf-8"))
-        cmd, remote_id, _, _ = self._proto.receive(local_id=local_id, remote_id=remote_id)
-
-        if cmd != OKAY:
-            raise Exception("Fail to send Encoding")
-
-        with open(local_filepath, "rb") as f:
-            while True:
-                data = f.read(MAX_ADB_DATA)
-                if data:
-                    self._proto.send(WRTE, local_id, remote_id, struct.pack(b"<2I", int.from_bytes(b"DATA", byteorder="little"), len(data)))
-                    cmd, remote_id, _, _ = self._proto.receive(local_id=local_id, remote_id=remote_id)
-                    if cmd != OKAY:
-                        raise Exception("Fail to send Data 1")
-
-                    self._proto.send(WRTE, local_id, remote_id, data)
-                    cmd, remote_id, _, _ = self._proto.receive(local_id=local_id, remote_id=remote_id)
-                    if cmd != OKAY:
-                        raise Exception("Fail to send Data 2")
-                else:
-                    break
-
-        self._proto.send(WRTE, local_id, remote_id,
-                         struct.pack(b"<2I", int.from_bytes(b"DONE", byteorder="little"), int(time.time())))
-        cmd, remote_id, _, _ = self._proto.receive(local_id=local_id, remote_id=remote_id)
-        if cmd != OKAY:
-            raise Exception("Fail to send DONE")
-
-        _, _, _, res = self._proto.receive(local_id=local_id, remote_id=remote_id, cmd=[WRTE])
-        cmd, _ = struct.unpack(b"<2I", res)
-        if cmd.to_bytes(4, byteorder="little") == b"OKAY":
-            print("push success")
-        elif cmd.to_bytes(4, byteorder="little") == b"FAIL":
-            print("fail to push")
-
-        self._proto.send(OKAY, local_id, remote_id)
-        self._proto.send(WRTE, local_id, remote_id, struct.pack(b"<2I", int.from_bytes(b"QUIT", byteorder="little"), 0))
-        self._proto.receive(local_id, remote_id, cmd=[CLSE])
-        self._proto.send(CLSE, local_id, remote_id)
 
     def forward(self, local_p, remote_p):
         server = self.forward_list["tcp:{} tcp:{}".format(local_p, remote_p)] = ProxyServer("127.0.0.1", local_p, remote_p, self._proto)
