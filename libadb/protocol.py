@@ -1,5 +1,8 @@
 # -*-coding:utf-8-*-
-import struct
+import struct, traceback, time
+from .exceptions import *
+from queue import Queue, Empty, Full
+from threading import Thread
 
 # 版本信息，认证时需要
 VERSION = 0x01000000
@@ -20,44 +23,70 @@ AUTH_TOKEN = 1
 AUTH_SIGNATURE = 2
 AUTH_RSAPUBLICKEY = 3
 
+
 def name(num):
     return struct.pack(b'<I', num)
+
 
 class ADBProtocol(object):
 
     def __init__(self, handle):
         self._handle = handle
         self._cache_list = []
+        self.receive_queue = {"default": Queue(10000)}
+        self.send_queue = Queue(10000)
 
-    def receive(self, local_id=None, remote_id=None, cmd=(), ms=0):
-        # 先检查cache中的结果
-        for response in self._cache_list[:]:
-            if self._is_expected(response, local_id, remote_id, cmd):
-                self._cache_list.remove(response)
-                return response
+        self.send_task = Thread(target=self.send_loop, daemon=True)
+        self.receive_task = Thread(target=self.receive_loop, daemon=True)
 
-        # 再去读取usb缓冲区中的, todo 超时处理
+        self.send_task.start()
+        self.receive_task.start()
+
+    def receive(self, local_id=None, remote_id=None, cmd=(), timeout=0):
         while True:
-            response = self._atom_receive(ms)
-            print("{} {} <<< {}".format(name(response[0]), response[2], response[1]))
+            if AUTH in cmd or CNXN in cmd:
+                response = self.receive_queue.get("default").get(block=True)
+            else:
+                response = self.receive_queue.get(local_id).get(block=True)
             if self._is_expected(response, local_id, remote_id, cmd):
                 return response
+
+    def send_loop(self):
+        while True:
+            data = self.send_queue.get(block=True)
+            self._handle.write(data)
+
+    def receive_loop(self):
+        while True:
+            response = self._atom_receive()
+            if not response:
+                continue
+            if response[0] in [AUTH, CNXN]:
+                self.receive_queue["default"].put(response, block=True)
+            elif response[2] in self.receive_queue:
+                self.receive_queue[response[2]].put(response, block=True)
             else:
-                self._cache_list.append(response)
+                print("delete", response)
 
     def send(self, cmd, arg0, arg1, data=b""):
-        print("{} {} >>> {}".format(name(cmd), arg0, arg1))
+        # todo 这里要不要做长度判断
+        if cmd in [WRTE, OPEN] and arg0 not in self.receive_queue:
+            self.receive_queue[arg0] = Queue(10000)
+
         msg = struct.pack(b'<6I', cmd, arg0, arg1, len(data), self.calculate_checksum(data), cmd ^ 0xFFFFFFFF)
-        self._handle.write(msg)
+        self.send_queue.put(msg)
         if cmd in [WRTE, OPEN, CNXN, AUTH]:
-            self._handle.write(data)
+            self.send_queue.put(data)
 
     def _is_expected(self, data, local_id=None, remote_id=None, cmd=()):
         if local_id and data[2] != local_id:
+            print("local_id is not expect: {}".format(local_id))
             return False
         if remote_id and data[1] != remote_id:
+            print("remote_id is not expect: {}".format(remote_id))
             return False
         if cmd and data[0] not in cmd:
+            print("cmd is not expect")
             return False
         return True
 
@@ -66,21 +95,23 @@ class ADBProtocol(object):
         adb协议中不允许穿插其他内容的读取操作，比如：WRTE 命令后会紧跟 数据
         """
         msg = self._handle.read(24, timeout=ms)
+        if len(msg) != 24:
+            return ()
         cmd, arg0, arg1, length, checksum, unused_magic = struct.unpack(b'<6I', msg)
         if cmd == WRTE:
-            data = self._read_specified_length(length, checksum)
+            data = self._read_specified_length(length, checksum, ms)
             self.send(OKAY, arg1, arg0)
             return cmd, arg0, arg1, data  # 命令,remote_id,local_id,数据
         elif cmd in [AUTH, CNXN]:
-            data = self._read_specified_length(length, checksum)
+            data = self._read_specified_length(length, checksum, ms)
             return cmd, arg0, arg1, data  # CNXN, version, maxdata, 设备信息 or AUTH, type, 0, 数据
         else:
             return cmd, arg0, arg1, b""
 
-    def _read_specified_length(self, _len, checksum):
+    def _read_specified_length(self, _len, checksum, ms):
         data = bytearray()
         while _len > 0:
-            temp = bytearray(self._handle.read(_len))
+            temp = bytearray(self._handle.read(_len, ms))
             data += temp
             _len -= len(temp)
         if checksum == self.calculate_checksum(data):

@@ -13,7 +13,8 @@ class USBHandle(object):
         self.write_endpoint = kwargs.get("write_endpoint")
         self.max_read_packet_len = kwargs.get("max_read_packet_len")
         self.handle = kwargs.get("handle")
-        self.lock = threading.Lock()
+        self.w_lock = threading.Lock()
+        self.r_lock = threading.Lock()
         # self.flush()
 
     def flush(self):
@@ -23,25 +24,28 @@ class USBHandle(object):
             traceback.print_exc()
 
     def write(self, data):
-        self.lock.acquire()
+        self.w_lock.acquire()
         try:
             print("[{}]>>>:{}".format("USB", data))
             return self.handle.bulkWrite(self.write_endpoint, data)
         except:
             pass
         finally:
-            self.lock.release()
+            self.w_lock.release()
 
-    def read(self, data_length, timeout=None):
-        self.lock.acquire()
+    def read(self, data_length, timeout=0):
+        self.r_lock.acquire()
         try:
-            data = self.handle.bulkRead(self.read_endpoint, data_length)
+            # print("begin_read")
+            data = self.handle.bulkRead(self.read_endpoint, data_length, timeout=timeout)
             print("[{}]<<<:{}".format("USB", data))
+        except usb1.USBErrorTimeout:
+            raise TimeOutError()
         except:
             data = b""
             traceback.print_exc()
         finally:
-            self.lock.release()
+            self.r_lock.release()
         return data
 
 

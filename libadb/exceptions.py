@@ -31,3 +31,9 @@ class NoDeviceFound(Exception):
 
     def __init__(self):
         super(NoDeviceFound, self).__init__("No Device Found")
+
+
+class TimeOutError(Exception):
+
+    def __init__(self):
+        super(TimeOutError, self).__init__("Read Data time out")
